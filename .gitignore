@@ -1,0 +1,21 @@
+# OS and editor files
+.DS_Store
+.AppleDouble
+._*
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Local development dependencies and caches
+node_modules/
+.npm/
+.playwright/
+test-results/
+playwright-report/
+coverage/
+
+# macOS/Xcode generated files (if packaging later)
+DerivedData/
+*.xcuserstate
+*.xcuserdata/
