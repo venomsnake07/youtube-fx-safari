@@ -1,0 +1,70 @@
+name: Publish YouTube FX v1.4.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-v1.4.0.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Package Safari extension
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
+
+          source = Path(".")
+          manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
+          assert manifest["version"] == "1.4.0", "Unexpected extension version"
+
+          files = sorted(
+              [
+                  p for p in source.iterdir()
+                  if p.is_file() and p.suffix.lower() in {".js", ".json", ".html", ".css"}
+              ] + list(Path("icons").glob("*.png")) +
+              [Path(name) for name in (
+                  "README.md", "LICENSE", "THIRD-PARTY-NOTICES.md", "START-HERE.html"
+              )],
+              key=lambda p: p.as_posix()
+          )
+
+          required = (
+              set(manifest["content_scripts"][0]["js"]) |
+              set(manifest["content_scripts"][1]["js"]) |
+              set(manifest["web_accessible_resources"][0]["resources"]) |
+              set(manifest["icons"].values()) |
+              set(manifest["action"]["default_icon"].values()) |
+              {manifest["action"]["default_popup"], "manifest.json"}
+          )
+          assert required.issubset({p.as_posix() for p in files}), (
+              "Missing required extension files: " + str(required - {p.as_posix() for p in files})
+          )
+          with ZipFile("YouTube-FX-Safari-v1.4.0.zip", "w", ZIP_DEFLATED, compresslevel=9) as archive:
+              for file in files:
+                  archive.write(file, file.as_posix())
+          print(f"Packaged {len(files)} runtime and documentation files")
+          PY
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v1.4.0 YouTube-FX-Safari-v1.4.0.zip \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "YouTube FX for Safari v1.4.0" \
+            --latest \
+            --notes "First public release of YouTube FX for Safari. Pitch shifting (independent of playback speed), adjustable reverb, and Safari audio-stream recovery for YouTube and YouTube Music. Download the ZIP under Assets, then follow README.md for temporary Safari installation. Requires macOS Safari 18.4+. This is not an App Store extension or permanent installation."
