@@ -19,7 +19,7 @@ A Safari Web Extension for YouTube and YouTube Music. Requires Safari 18.4 or la
 
 ## Quick installation
 
-1. Download the repository as a ZIP (or download the packaged release ZIP, when available).
+1. Download the **[v1.4.0 extension ZIP](https://github.com/venomsnake07/youtube-fx-safari/releases/download/v1.4.0/YouTube-FX-Safari-v1.4.0.zip)** from [GitHub Releases](https://github.com/venomsnake07/youtube-fx-safari/releases/latest).
 2. In Safari, enable **Show features for web developers** under Settings → Advanced.
 3. In Settings → Developer, select **Add Temporary Extension…**, then choose the extracted folder containing `manifest.json` (or the extension ZIP).
 4. Enable the extension and allow it on YouTube/YouTube Music. Reload open YouTube tabs.
@@ -30,7 +30,7 @@ Temporary extensions are removed after 24 hours or when Safari quits. This free 
 ## Update from an earlier version
 
 1. Remove the old temporary extension in Safari Settings → Extensions.
-2. Add YouTube-FX-Safari-1.4.0.zip under Safari Settings → Developer → Add Temporary Extension.
+2. Add the downloaded YouTube-FX-Safari-v1.4.0.zip under Safari Settings → Developer → Add Temporary Extension.
 3. Reload every YouTube tab. A full reload is essential: this version observes the player’s stream setup from the beginning of page loading.
 4. Check the panel header says **v1.4.0**, set YouTube playback speed to **Normal (1×)**, and start a video.
 5. Enable effects and allow about **5–10 seconds** for automatic recovery if Safari’s original audio connection returns zeros.
