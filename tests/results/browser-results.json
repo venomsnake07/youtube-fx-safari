@@ -1,0 +1,43 @@
+{
+  "browser": "Playwright WebKit (Linux)",
+  "graph": {
+    "backend": "AudioWorklet",
+    "claims": 1
+  },
+  "offline": {
+    "frequencies": [
+      659.2552272883001,
+      494.4412899655934
+    ],
+    "levels": [
+      0.1767941440749583,
+      0.17677090185584154
+    ],
+    "frames": 144000
+  },
+  "reverb": {
+    "early": 0.07134809675620608,
+    "late": 0.00004580490321226337,
+    "after": 0.000009542100432776436,
+    "stereo": true,
+    "finite": true,
+    "first": 0.10002083333333334,
+    "last": 3.4133125,
+    "peak": 0.01673496514558792,
+    "sampleRate": 48000
+  },
+  "checks": [
+    "Page panel activates a real Web Audio graph and attaches an HTML media element.",
+    "Sliders and presets update the engine without changing playbackRate.",
+    "Playlist navigation reuses the source; replacing the player detaches the old source.",
+    "Turn off restores the original direct-audio path.",
+    "Real WebKit AudioWorklet offline render shifts both stereo channels by +7 semitones at fixed duration.",
+    "Real WebKit convolution render produces a finite, decaying stereo reverb tail.",
+    "The panel hides outside supported YouTube player pages.",
+    "Toolbar popup controls, presets, cents, and power reach the correct tab; layout fits 350px.",
+    "The real WebKit ScriptProcessor fallback runs and handles pitch controls when AudioWorklet is unavailable.",
+    "Changing controls from the toolbar on a fresh playing page starts processing, receives real PCM, and output-level changes measurably alter the actual output.",
+    "Audio diagnostics display a versioned, copyable report without media URLs."
+  ],
+  "pageErrors": []
+}

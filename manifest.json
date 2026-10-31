@@ -1,0 +1,95 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube FX — Reverb & Pitch",
+  "short_name": "YouTube FX",
+  "version": "1.4.0",
+  "description": "Simple reverb and independent pitch shifting for YouTube and YouTube Music. All audio stays on your Mac.",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://youtube.com/*",
+    "https://music.youtube.com/*",
+    "https://m.youtube.com/*"
+  ],
+  "action": {
+    "default_title": "YouTube FX",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png",
+    "256": "icons/icon-256.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://youtube.com/*",
+        "https://music.youtube.com/*",
+        "https://m.youtube.com/*"
+      ],
+      "js": [
+        "settings.js",
+        "pitch-kernel.js",
+        "dsp.js",
+        "audio-engine.js",
+        "stream-demux.js",
+        "stream-cache.js",
+        "stream-tap.js",
+        "pcm-buffer.js",
+        "stream-playback.js",
+        "stream-recovery.js",
+        "page-engine.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://youtube.com/*",
+        "https://music.youtube.com/*",
+        "https://m.youtube.com/*"
+      ],
+      "js": [
+        "settings.js",
+        "remote-engine.js",
+        "ui.js",
+        "content.js"
+      ],
+      "world": "ISOLATED",
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "pitch-worklet.js",
+        "pitch-kernel.js",
+        "dsp.js",
+        "pcm-worklet.js",
+        "pcm-buffer.js"
+      ],
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://youtube.com/*",
+        "https://music.youtube.com/*",
+        "https://m.youtube.com/*"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'"
+  }
+}
