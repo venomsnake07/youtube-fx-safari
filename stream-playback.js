@@ -26,7 +26,7 @@
     }
     async prepare() {
       const ctx = this.engine.context; let timer;
-      this.capacity = 2 ** Math.ceil(Math.log2(Math.max(ctx.sampleRate, this.engine.recovery?.track?.config?.sampleRate || 0) * 20));
+      this.capacity = 2 ** Math.ceil(Math.log2(Math.max(ctx.sampleRate, this.engine.recovery?.track?.config?.sampleRate || 0) * 32));
       if (ctx.audioWorklet && typeof AudioWorkletNode === 'function') {
         try {
           await Promise.race([ctx.audioWorklet.addModule(this.engine.resourceURL('pcm-worklet.js')),
@@ -34,7 +34,7 @@
           if (this.destroyed) return;
           this.node = new AudioWorkletNode(ctx, 'youtube-fx-pcm', {numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2],
             processorOptions: {capacity: this.capacity, resamplerTable: globalThis.YouTubeFXDSP.resamplerTable()}});
-          this.node.port.onmessage = event => {if (event.data.epoch === this.epoch) {this.cached = event.data; if (this.cached.playing && this.cached.bufferedMs < 8000) this.onNeedData();}};
+          this.node.port.onmessage = event => {if (event.data.epoch === this.epoch) {this.cached = event.data; if (this.cached.playing && this.cached.bufferedMs < 8000 * (this.engine.settings.rate / 100 || 1)) this.onNeedData();}};
           this.node.onprocessorerror = () => {this.ready = false; this.engine.recovery?.fail('Audio queue stopped. Reload YouTube.');};
           this.backend = 'AudioWorklet queue';
         } catch { /* Keep the continuous queue in compatibility mode as well. */ }
@@ -47,7 +47,7 @@
         this.node.onaudioprocess = event => {
           this.timeline.render([event.outputBuffer.getChannelData(0), event.outputBuffer.getChannelData(1)], Math.round(event.playbackTime * ctx.sampleRate));
           this.cached = this.timeline.stats();
-          if (this.cached.playing && this.cached.bufferedMs < 8000) this.onNeedData();
+          if (this.cached.playing && this.cached.bufferedMs < 8000 * (this.engine.settings.rate / 100 || 1)) this.onNeedData();
         };
         this.backend = 'Compatibility queue';
       }
@@ -73,7 +73,7 @@
       if (this.timeline) this.timeline.play(mediaTime, frame); else this.send('play', {mediaTime, contextFrame: frame});
     }
     pause() {if (!this.ready) return; if (this.timeline) this.timeline.pause(); else this.send('pause');}
-    rate(value) {if (!this.ready) return; if (this.timeline) this.timeline.setRate(value); else this.send('rate', {value});}
+    rate(value, immediate = false) {if (!this.ready) return; if (this.timeline) this.timeline.setRate(value, immediate); else this.send('rate', {value, immediate});}
     stats() {return {backend: this.backend, ...this.cached};}
     destroy() {this.pause(); this.destroyed = true; if (this.node?.port) {this.send('destroy'); this.node.port.onmessage = null;} this.node?.disconnect(); this.ready = false;}
   }

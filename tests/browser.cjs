@@ -71,6 +71,23 @@ async function main() {
     await page.getByRole('button', {name: 'Play test audio', exact: true}).click();
     await page.waitForFunction(() => globalThis.__fixtureEngine.status().attached);
     checks.push('Page panel activates a real Web Audio graph and attaches an HTML media element.');
+    await page.getByLabel('Sample rate', {exact: true}).fill('95');
+    await page.getByLabel('Sample rate', {exact: true}).dispatchEvent('input');
+    await page.waitForFunction(() => __fixtureEngine.settings.rate === 95 && document.querySelector('video').playbackRate === .95);
+    assert.equal(await page.evaluate(() => __fixtureEngine.pitchActive), false);
+    assert.equal(await page.locator('video').evaluate(video => video.preservesPitch), false);
+    await page.getByRole('button', {name: 'Increase sample rate', exact: true}).click();
+    await page.waitForFunction(() => __fixtureEngine.settings.rate === 96);
+    await page.getByRole('button', {name: 'Decrease sample rate', exact: true}).click();
+    await page.waitForFunction(() => __fixtureEngine.settings.rate === 95);
+    checks.push('Linked sample-rate slider and +/− controls set 95% native speed with browser pitch preservation disabled and spectral pitch bypassed.');
+    await page.getByRole('button', {name: 'Unlink speed and pitch', exact: true}).click();
+    assert.equal(await page.evaluate(() => __fixtureEngine.pitchActive), false);
+    await page.getByLabel('Speed', {exact: true}).fill('100');
+    await page.getByLabel('Speed', {exact: true}).dispatchEvent('input');
+    await page.getByText('Fine tuning', {exact: true}).click();
+    await page.getByLabel('Pitch fine tune', {exact: true}).fill('0');
+    await page.getByLabel('Pitch fine tune', {exact: true}).dispatchEvent('input');
     await page.getByLabel('Pitch', {exact: true}).fill('7');
     await page.getByLabel('Pitch', {exact: true}).dispatchEvent('input');
     await page.waitForFunction(() => globalThis.__fixtureEngine.settings.semitones === 7);
@@ -78,7 +95,7 @@ async function main() {
     await page.getByRole('button', {name: 'Piano hall', exact: true}).click();
     await page.waitForFunction(() => globalThis.__fixtureEngine.settings.reverb === 28);
     await page.screenshot({path: path.join(output, 'youtube-panel.png')});
-    checks.push('Sliders and presets update the engine without changing playbackRate.');
+    checks.push('Unlinking keeps the audible pitch; speed, independent pitch, and presets reach the audio engine.');
     const graph = await page.evaluate(() => ({backend: globalThis.__fixtureEngine.backend, claims: globalThis.__fixtureEngine.activeSources.size}));
     assert.equal(graph.claims, 1);
     await page.evaluate(() => {history.pushState({}, '', '/watch?v=next'); window.dispatchEvent(new Event('yt-navigate-finish'));});
@@ -143,7 +160,8 @@ async function main() {
     const popup = await popupContext.newPage(); popup.on('pageerror', error => failures.push(error.message));
     await popup.goto(origin + '/__fx/popup.html');
     await popup.getByRole('button', {name: 'Dreamy', exact: true}).click();
-    await poll(async () => (await page.evaluate(() => globalThis.__fixtureRequest({type: 'youtube-fx:get'}))).settings.semitones === -2);
+    await poll(async () => (await page.evaluate(() => globalThis.__fixtureRequest({type: 'youtube-fx:get'}))).settings.rate === 89);
+    await popup.getByRole('button', {name: 'Unlink speed and pitch', exact: true}).click();
     await popup.getByText('Fine tuning', {exact: true}).click();
     await popup.getByLabel('Pitch fine tune', {exact: true}).fill('23'); await popup.getByLabel('Pitch fine tune', {exact: true}).dispatchEvent('input');
     await poll(async () => (await page.evaluate(() => globalThis.__fixtureRequest({type: 'youtube-fx:get'}))).settings.cents === 23);
@@ -170,6 +188,7 @@ async function main() {
     assert.equal(await fallback.evaluate(() => globalThis.__fixtureEngine.backend), 'Compatibility');
     await fallback.evaluate(() => {globalThis.__compatibilityCalls = 0; globalThis.__fixtureEngine.pitchNode.addEventListener('audioprocess', () => globalThis.__compatibilityCalls++);});
     await fallback.getByRole('button', {name: 'Play test audio', exact: true}).click();
+    await fallback.getByRole('button', {name: 'Unlink speed and pitch', exact: true}).click();
     await fallback.getByLabel('Pitch', {exact: true}).fill('-3'); await fallback.getByLabel('Pitch', {exact: true}).dispatchEvent('input');
     await fallback.waitForFunction(() => globalThis.__compatibilityCalls > 4);
     assert.equal(await fallback.locator('video').evaluate(video => video.playbackRate), 1);
@@ -209,4 +228,5 @@ async function main() {
     console.log(JSON.stringify(result, null, 2));
   } finally {await page.evaluate(() => {for (const media of document.querySelectorAll('video')) media.pause();}).catch(() => {}); await context.close(); await browser.close();}
 }
-main().catch(error => {console.error(error); process.exitCode = 1;});
+const testDeadline = setTimeout(() => {console.error('Browser test deadline exceeded'); process.exit(1);}, 120000);
+main().catch(error => {console.error(error); process.exitCode = 1;}).finally(() => clearTimeout(testDeadline));

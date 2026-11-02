@@ -46,7 +46,7 @@ const enabled = {...globalThis.YouTubeFXSettings.DEFAULTS, enabled: true};
 
 test('worklet load failure selects the real fallback; enabled/disabled routing preserves the player speed', async () => {
   const engine = new Engine(file => file), media = makeMedia();
-  engine.apply({...enabled, semitones: 7}); await engine.start(); engine.attach(media);
+  engine.apply({...enabled, linked: false, semitones: 7}); await engine.start(); engine.attach(media);
   assert.equal(engine.backend, 'Compatibility'); assert.equal(engine.status().attached, true);
   assert.equal(engine.context.claims, 1); assert.equal(media.playbackRate, 1);
   assert.equal(engine.bypass.gain.target, 0); assert.equal(engine.fx.gain.target, 1);
@@ -66,6 +66,17 @@ test('a reused YouTube video is claimed once, disconnected elements are released
   const replacement = makeMedia(); engine.attach(replacement); assert.equal(engine.context.claims, 2);
   assert.equal(engine.status().attached, true);
 });
+test('linked rate changes bypass pitch processing and restore the original native transport when disabled', async () => {
+  const engine = new Engine(file => file), media = {...makeMedia(), playbackRate: 1.25, preservesPitch: true, webkitPreservesPitch: true};
+  engine.apply({...enabled, rate: 95}); await engine.start(); engine.attach(media);
+  assert.equal(media.playbackRate, .95); assert.equal(media.preservesPitch, false); assert.equal(media.webkitPreservesPitch, false);
+  assert.equal(engine.pitchActive, false); assert.equal(engine.pitchDirect.gain.target, 1);
+  engine.apply({...enabled, rate: 95, linked: false, semitones: 0});
+  assert.equal(engine.pitchActive, true);
+  assert.ok(Math.abs(globalThis.YouTubeFXSettings.correctionPitch(engine.settings) - .8880069773) < 1e-6);
+  engine.apply({...engine.settings, enabled: false});
+  assert.equal(media.playbackRate, 1.25); assert.equal(media.preservesPitch, true); assert.equal(media.webkitPreservesPitch, true);
+});
 test('leaving a video page bypasses effects and protected audio is not claimed', async () => {
   const engine = new Engine(file => file); engine.apply(enabled); await engine.start();
   engine.apply(enabled, false); assert.equal(engine.bypass.gain.target, 1);
@@ -79,8 +90,8 @@ test('another extension owning the media yields an actionable error and bypass',
 });
 test('repeated settings updates do not cancel the pitch startup warmup', async () => {
   const engine = new Engine(file => file); engine.apply(enabled); await engine.start();
-  engine.apply({...enabled, semitones: 3}); const readyAt = engine.pitchReadyAt;
-  engine.context.currentTime += 0.01; engine.apply({...enabled, semitones: 3, reverb: 40});
+  engine.apply({...enabled, linked: false, semitones: 3}); const readyAt = engine.pitchReadyAt;
+  engine.context.currentTime += 0.01; engine.apply({...enabled, linked: false, semitones: 3, reverb: 40});
   assert.equal(engine.pitchReadyAt, readyAt); assert.ok(engine.pitchWet.gain.time >= readyAt - 1e-6);
 });
 test('a stopped worklet fails open and cannot be accidentally re-enabled', async t => {
@@ -154,6 +165,6 @@ test('manifest and packaged resources have YouTube-only scope and no remote exec
   for (const file of [...manifest.content_scripts.flatMap(script => script.js), ...manifest.web_accessible_resources.flatMap(group => group.resources), manifest.action.default_popup]) assert.ok(fs.existsSync(path.join(root, file)), file);
   for (const file of fs.readdirSync(root).filter(name => name.endsWith('.js'))) {
     const code = fs.readFileSync(path.join(root, file), 'utf8');
-    assert.doesNotMatch(code, /\beval\s*\(|new Function\s*\(|\bfetch\s*\(|XMLHttpRequest|\.playbackRate\s*=/, file);
+    assert.doesNotMatch(code, /\beval\s*\(|new Function\s*\(|\bfetch\s*\(|XMLHttpRequest/, file);
   }
 });

@@ -16,6 +16,7 @@
         "inputLatencySamples": 5760,
         "outputLatencySamples": 8640,
         "resamplerRadius": 48,
+        "extendedOutputLatencySamples": 7200,
         "latencySamples": 14448,
         "latencyMs": 301
       },
@@ -49,6 +50,7 @@
         "inputLatencySamples": 5760,
         "outputLatencySamples": 8640,
         "resamplerRadius": 48,
+        "extendedOutputLatencySamples": 7200,
         "latencySamples": 14448,
         "latencyMs": 301
       },
@@ -81,6 +83,7 @@
         "inputLatencySamples": 5760,
         "outputLatencySamples": 8640,
         "resamplerRadius": 48,
+        "extendedOutputLatencySamples": 7200,
         "latencySamples": 14448,
         "latencyMs": 301
       },
@@ -117,13 +120,14 @@
         "inputLatencySamples": 5760,
         "outputLatencySamples": 8640,
         "resamplerRadius": 48,
+        "extendedOutputLatencySamples": 7200,
         "latencySamples": 14448,
         "latencyMs": 301
       },
-      "correlation": 0.9999999999999981,
+      "correlation": 0.999999999999998,
       "levels": [
-        0.0024947346561336172,
-        0.0024947346555344654
+        0.002494734656133617,
+        0.002494734655571595
       ],
       "peak": 0.6893656849861145,
       "reductionDb": -0.00023668880749028176,
@@ -147,6 +151,7 @@
         "inputLatencySamples": 5760,
         "outputLatencySamples": 8640,
         "resamplerRadius": 48,
+        "extendedOutputLatencySamples": 7200,
         "latencySamples": 14448,
         "latencyMs": 301
       },

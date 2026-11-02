@@ -87,9 +87,12 @@ test('seeking within retained data while paused does not start the PCM queue', (
   media.currentTime = 3; media.seeking = true; engine.context.currentTime = .3; recovery.tick();
   assert.equal(nodes.length, 1); assert.equal(recovery.active, false); assert.equal(recovery.transport.resets, 0);
 });
-test('non-normal YouTube speed keeps the native audio path and requests 1x without changing playbackRate', () => {
-  const {recovery, original, media} = make(); media.playbackRate = 1.5; recovery.tick();
-  assert.equal(original.enabled, true); assert.equal(media.playbackRate, 1.5); assert.match(recovery.message, /Normal/);
+test('non-normal speed recovers decoded audio at the selected rate', () => {
+  const {recovery, original, media} = make(); media.playbackRate = 1.5;
+  recovery.buffers = [{start: 0, end: 10, key: 'a'}];
+  const rates = []; recovery.transport.rate = (rate, immediate) => rates.push({rate, immediate}); recovery.tick();
+  assert.equal(original.enabled, false); assert.equal(media.playbackRate, 1.5); assert.equal(recovery.phase, 'active');
+  assert.ok(rates.some(item => item.rate === 1.5 && item.immediate));
 });
 test('recovery preloads and advances decoded input by the pitch processor latency', () => {
   const {recovery, engine, nodes} = make(); engine.processingLatencySeconds = () => .318;
@@ -106,4 +109,13 @@ test('latency retargeting waits for pitch controls to settle and does not restar
   engine.context.currentTime = media.currentTime = .6; recovery.tick(); assert.equal(nodes.length, 2);
   engine.context.currentTime = media.currentTime = .8; recovery.tick(); assert.equal(nodes.length, 2);
   assert.equal(recovery.decoder.state, 'configured'); assert.equal(recovery.lookahead, .25);
+});
+for (const speed of [.5, .95, 1.5, 2]) test(`recovery at ${speed}x scales latency to media time and retains the queue across normal clock advances`, () => {
+  const {recovery, engine, media, nodes} = make(); engine.processingLatencySeconds = () => .318;
+  media.playbackRate = speed; recovery.buffers = [{start: 0, end: 30, key: 'a'}];
+  recovery.wallNow = () => engine.context.currentTime; recovery.tick();
+  assert.ok(Math.abs(nodes[0].time - (.1 + speed * (.025 + .318))) < 1e-10);
+  for (let i = 1; i <= 10; i++) {engine.context.currentTime = .1 + i; media.currentTime = .1 + speed * i; recovery.tick();}
+  assert.equal(recovery.active, true); assert.equal(recovery.transport.resets, 0); assert.equal(engine.pitchResets, 0);
+  assert.equal(recovery.diagnostics().latencyCompensationMs, 318);
 });

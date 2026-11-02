@@ -3,7 +3,7 @@ import './dsp.js';
 
 class YouTubePitchProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
-    return [{name: 'pitch', defaultValue: 0, minValue: -12.5, maxValue: 12.5, automationRate: 'k-rate'},
+    return [{name: 'pitch', defaultValue: 0, minValue: -24.5, maxValue: 24.5, automationRate: 'k-rate'},
       {name: 'active', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate'}];
   }
   constructor(options = {}) {

@@ -6,12 +6,12 @@
   },
   "offline": {
     "frequencies": [
-      659.2552272883001,
-      494.4412899655934
+      659.2552272868062,
+      494.4412899586946
     ],
     "levels": [
-      0.1767941440749583,
-      0.17677090185584154
+      0.17679416270597947,
+      0.17677091628631023
     ],
     "frames": 144000
   },
@@ -28,7 +28,8 @@
   },
   "checks": [
     "Page panel activates a real Web Audio graph and attaches an HTML media element.",
-    "Sliders and presets update the engine without changing playbackRate.",
+    "Linked sample-rate slider and +/− controls set 95% native speed with browser pitch preservation disabled and spectral pitch bypassed.",
+    "Unlinking keeps the audible pitch; speed, independent pitch, and presets reach the audio engine.",
     "Playlist navigation reuses the source; replacing the player detaches the old source.",
     "Turn off restores the original direct-audio path.",
     "Real WebKit AudioWorklet offline render shifts both stereo channels by +7 semitones at fixed duration.",

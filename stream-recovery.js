@@ -140,7 +140,17 @@
       if (this.track.generation !== this.configGeneration) this.makeDecoder('decoder configuration changed', this.active);
       const time = media.currentTime, clock = engine.context.currentTime;
       const wall = this.wallNow();
-      const desiredLookahead = engine.processingLatencySeconds?.() || 0;
+      const speed = media.playbackRate;
+      if (!Number.isFinite(speed) || speed < 0.5 || speed > 2) {this.restore(); this.phase = 'waiting'; this.message = 'Choose a playback rate from 50% to 200%.'; return;}
+      this.horizon = 12 * Math.max(1, speed);
+      // Queue timestamps are media seconds; DSP latency is in wall seconds.
+      const desiredLookahead = speed * (engine.processingLatencySeconds?.() || 0);
+      const rateChanged = this.playbackRate !== speed;
+      if (rateChanged && this.transport?.ready) {
+        this.transport.rate(speed, true); this.playbackRate = speed;
+        this.anchorTime = time; this.anchorClock = clock; this.lastRateUpdate = clock;
+        if (this.active) this.note('playback rate adjusted; queue retained');
+      }
       if (this.pendingLookahead === null || Math.abs(this.pendingLookahead - desiredLookahead) > 0.00001) {
         this.pendingLookahead = desiredLookahead; this.lookaheadChangedAt = clock;
       }
@@ -150,10 +160,10 @@
       if (Math.max(elapsed, wallElapsed) > 0.75) this.clockSettleUntil = clock + 0.75;
       // A delayed page callback or an interrupted audio clock is not a seek.
       // Wall time distinguishes it from a real forward timeline jump.
-      const discontinuity = this.lastTime !== null && (delta < -0.2 || delta - Math.max(0, elapsed, wallElapsed) > 0.75
-        || (media.seeking && Math.abs(delta - (media.paused ? 0 : Math.max(0, elapsed))) > 0.2));
+      const discontinuity = this.lastTime !== null && (delta < -0.2 || delta - Math.max(0, elapsed, wallElapsed) * speed > 0.75
+        || (media.seeking && Math.abs(delta - (media.paused ? 0 : Math.max(0, elapsed) * speed)) > 0.2));
       if (discontinuity) {
-        const target = time + 0.025 + desiredLookahead;
+        const target = time + speed * 0.025 + desiredLookahead;
         const buffered = this.buffers.some(item => item.start <= target && item.end > target);
         if (buffered) {
           // After a blocked page, media.currentTime can catch up in several
@@ -168,18 +178,18 @@
       }
       if (this.pendingRelocation && clock >= this.clockSettleUntil) {
         this.pendingRelocation = false;
-        const target = time + 0.025 + desiredLookahead;
+        const target = time + speed * 0.025 + desiredLookahead;
         if (!this.buffers.some(item => item.start <= target && item.end > target)) {
           this.restore(); this.makeDecoder('uncached timeline relocation'); engine.resetPitch();
         }
       }
       if (delta > 0.002 || this.lastAdvanceClock === null) this.lastAdvanceClock = clock;
       this.lastTime = time; this.lastClock = clock; this.lastWall = wall;
-      if (media.paused || Math.abs(media.playbackRate - 1) > 0.001 || engine.context.state !== 'running') {
+      if (media.paused || engine.context.state !== 'running') {
         if (this.active) {this.note(media.paused ? 'player paused; queue retained' : 'playback interrupted; queue retained'); this.restore();}
         this.held = true;
-        this.phase = media.paused ? 'paused' : engine.context.state !== 'running' ? 'interrupted' : 'waiting';
-        this.message = Math.abs(media.playbackRate - 1) > 0.001 ? 'Set YouTube playback speed to Normal (1×) to use Safari stream recovery.' : '';
+        this.phase = media.paused ? 'paused' : 'interrupted';
+        this.message = '';
         this.flushPCM(time); return;
       }
       if (!this.decoder || this.decoder.state !== 'configured') {
@@ -193,7 +203,7 @@
         if (!this.held) {this.note('player buffering; queue retained'); this.transport.pause(); this.held = true;}
         this.phase = 'buffering'; this.message = 'Waiting for the YouTube player…'; return;
       }
-      const covered = this.buffers.some(item => item.start <= time + 0.04 && item.end > time + 0.025);
+      const covered = this.buffers.some(item => item.start <= time + speed * 0.04 && item.end > time + speed * 0.025);
       const queueState = this.transport.stats();
       if (this.active && !this.held && !covered && queueState.bufferedMs < 30 && queueState.underrunFrames > 0) {
         if (this.starvingSince === null || this.starvingSince === undefined) this.starvingSince = clock;
@@ -202,12 +212,12 @@
         }
       } else this.starvingSince = null;
       if (!this.active || this.held) {
-        const target = time + 0.025 + desiredLookahead;
+        const target = time + speed * 0.025 + desiredLookahead;
         const lookaheadCovered = this.buffers.some(item => item.start <= target && item.end > target);
         const furthest = this.buffers.reduce((end, item) => Math.max(end, item.end), time);
-        if (!covered || !lookaheadCovered || furthest < target + 0.5) {this.phase = 'decoding'; this.message = ''; return;}
+        if (!covered || !lookaheadCovered || furthest < target + 0.5 * speed) {this.phase = 'decoding'; this.message = ''; return;}
         try {
-          this.lookahead = desiredLookahead; this.transport.play(target, clock + 0.025);
+          this.lookahead = desiredLookahead; this.transport.rate(speed, true); this.transport.play(target, clock + 0.025);
           if (!this.active) {
             this.savedTracks = [];
             for (let i = 0; i < media.audioTracks.length; i++) {const track = media.audioTracks[i]; this.savedTracks.push([track, track.enabled]); track.enabled = false;}
@@ -218,23 +228,23 @@
         } catch (error) {this.fail(error.message); return;}
       }
       if (Math.abs(this.lookahead - desiredLookahead) > 0.004 && clock - this.lookaheadChangedAt > 0.35) {
-        this.lookahead = desiredLookahead; this.transport.play(time + 0.025 + this.lookahead, clock + 0.025);
+        this.lookahead = desiredLookahead; this.transport.play(time + speed * 0.025 + this.lookahead, clock + 0.025);
         this.anchorTime = time; this.anchorClock = clock; this.note('pitch latency adjusted');
       }
       if (clock >= this.clockSettleUntil && clock - this.lastRateUpdate > 1) {
         const observed = queueState.playing && Number.isFinite(queueState.contextTime)
           ? queueState.mediaTime + Math.max(0, clock - queueState.contextTime) * queueState.rate - this.lookahead
-          : this.anchorTime + clock - this.anchorClock;
+          : this.anchorTime + (clock - this.anchorClock) * speed;
         const drift = time - observed;
         if (Number.isFinite(drift) && Math.abs(drift) > 0.35 && clock - (this.lastRealign || 0) > 3) {
-          const target = time + 0.025 + this.lookahead;
+          const target = time + speed * 0.025 + this.lookahead;
           if (this.buffers.some(item => item.start <= target && item.end > target)) {
             this.transport.play(target, clock + 0.025); this.anchorTime = time; this.anchorClock = clock;
             this.lastRealign = clock; this.note('audio clock realigned; queue retained');
           }
         }
-        const rate = !Number.isFinite(drift) || Math.abs(drift) < 0.08 ? 1 : Math.max(0.998, Math.min(1.002, 1 + drift * 0.005));
-        this.transport.rate(rate); this.lastRateUpdate = clock; if (rate !== 1) this.drifts++;
+        const correction = !Number.isFinite(drift) || Math.abs(drift) < 0.08 ? 1 : Math.max(0.998, Math.min(1.002, 1 + drift * 0.005));
+        this.transport.rate(speed * correction); this.lastRateUpdate = clock; if (correction !== 1) this.drifts++;
       }
       const volume = media.muted ? 0 : media.volume;
       if (this.gain.gain.setTargetAtTime) this.gain.gain.setTargetAtTime(volume, clock, 0.008); else this.gain.gain.value = volume;
@@ -245,7 +255,8 @@
         codec: this.track?.config?.codec || null, playback: this.transport?.stats() || null, reserveTargetMs: this.horizon * 1000,
         decoderResets: this.resets, lastResetReason: this.lastResetReason, rebuffers: this.rebuffers, retainedQueueResumes: this.resumeCount,
         timestampAdjustments: this.timeline.adjustments, duplicateChunks: this.timeline.duplicates,
-        latencyCompensationMs: Math.round(this.lookahead * 1000), encodedGapFrames: this.timeline.gapFrames,
+        playbackRate: this.playbackRate || 1, reserveWallMs: this.horizon / (this.playbackRate || 1) * 1000,
+        latencyCompensationMs: Math.round(this.lookahead / (this.playbackRate || 1) * 1000), mediaLookaheadMs: Math.round(this.lookahead * 1000), encodedGapFrames: this.timeline.gapFrames,
         driftUpdates: this.drifts, indexedPackets: this.index.items.length, recentEvents: this.events.slice()};
     }
   }

@@ -13,7 +13,7 @@
   });
   function render() { ui.update(settings, status); }
   async function queue(patch) {
-    settings = S.normalize({...settings, ...patch}); render();
+    settings = S.patch(settings, patch); render();
     pendingPatch = {...pendingPatch, ...patch};
     if (sending) return;
     sending = true;

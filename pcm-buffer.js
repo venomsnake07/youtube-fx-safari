@@ -70,12 +70,16 @@
       this.renderStarted = false;
     }
     pause() {this.playing = false;}
-    setRate(value) {this.targetRate = Math.max(0.998, Math.min(1.002, value));}
+    setRate(value, immediate = false) {
+      if (!Number.isFinite(value)) return;
+      this.targetRate = Math.max(0.499, Math.min(2.004, value));
+      if (immediate) this.currentRate = this.targetRate;
+    }
     render(outputs, contextFrame) {
       const frames = outputs[0]?.length || 0;
       this.contextFrame = contextFrame + frames;
       const ratio = this.sourceRate / this.sampleRate, config = this.resampler, table = this.table;
-      const cutoff = config.maximumCutoff / Math.max(1, ratio * 1.002);
+      const cutoff = config.maximumCutoff / Math.max(1, ratio * Math.max(this.currentRate, this.targetRate));
       const filter = Math.max(0, Math.min(config.cutoffs - 1e-8, (cutoff - config.minimumCutoff) / (config.maximumCutoff - config.minimumCutoff) * config.cutoffs));
       const bank = Math.floor(filter), bankMix = filter - bank;
       for (let i = 0; i < frames; i++) {
@@ -84,7 +88,7 @@
           if (outputs[0]) outputs[0][i] = this.last[0]; if (outputs[1]) outputs[1][i] = this.last[1];
           continue;
         }
-        if (!this.renderStarted) {this.readFrame += Math.max(0, contextFrame + i - this.startAt) * ratio; this.renderStarted = true;}
+        if (!this.renderStarted) {this.readFrame += Math.max(0, contextFrame + i - this.startAt) * ratio * this.currentRate; this.renderStarted = true;}
         this.currentRate += (this.targetRate - this.currentRate) * 0.00002;
         const frame = Math.floor(this.readFrame), fraction = this.readFrame - frame;
         const a = this.mask >= 0 ? frame & this.mask : ((frame % this.capacity) + this.capacity) % this.capacity;

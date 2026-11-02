@@ -50,7 +50,7 @@
     finally { busy = false; render(); }
   }
   function patch(raw, gesture = false) {
-    settings = S.normalize({...settings, ...raw});
+    settings = S.patch(settings, raw);
     engine.apply(settings, allowedPage()); save();
     // Toolbar messages are not trusted DOM events. Still attempt startup: when
     // Safari already permits audio this works without a second page button.

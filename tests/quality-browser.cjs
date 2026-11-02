@@ -27,7 +27,7 @@ async function run() {
         Object.defineProperty(ctx, 'resume', {value: () => Promise.resolve()});
         const engine = new YouTubeFXAudioEngine(file => 'https://www.youtube.com/__fx/' + file);
         engine.context = ctx;
-        engine.apply({...YouTubeFXSettings.DEFAULTS, enabled: true, semitones: -1, reverb: 0});
+        engine.apply({...YouTubeFXSettings.DEFAULTS, enabled: true, linked: false, semitones: -1, reverb: 0});
         await engine.start();
         const buffer = ctx.createBuffer(2, length, sr), left = buffer.getChannelData(0), right = buffer.getChannelData(1);
         const sine = (t, f, level = .25) => level * Math.sin(2 * Math.PI * t * f);
@@ -86,4 +86,5 @@ async function run() {
     console.log(JSON.stringify({passed: results.length, results}, null, 2));
   } finally {await context.close(); await browser.close();}
 }
-run().catch(error => {console.error(error); process.exitCode = 1;});
+const testDeadline = setTimeout(() => {console.error('Browser test deadline exceeded'); process.exit(1);}, 120000);
+run().catch(error => {console.error(error); process.exitCode = 1;}).finally(() => clearTimeout(testDeadline));

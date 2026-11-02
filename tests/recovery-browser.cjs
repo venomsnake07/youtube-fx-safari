@@ -51,8 +51,10 @@ async function run() {
         await new Promise((resolve, reject) => {videoBuffer.addEventListener('updateend', resolve, {once: true}); videoBuffer.addEventListener('error', reject, {once: true}); videoBuffer.appendBuffer(videoBytes);});
         const bytes = await (await fetch('/fixture.' + (nativeWebM ? type : 'mp4'))).arrayBuffer();
         await new Promise((resolve, reject) => {buffer.addEventListener('updateend', resolve, {once: true}); buffer.addEventListener('error', reject, {once: true}); buffer.appendBuffer(bytes);});
-        videoBuffer.timestampOffset = buffer.timestampOffset = 16;
-        for (const [target, data] of [[videoBuffer, videoBytes], [buffer, bytes]]) await new Promise((resolve, reject) => {target.addEventListener('updateend', resolve, {once: true}); target.addEventListener('error', reject, {once: true}); target.appendBuffer(data);});
+        for (const offset of [16, 32, 48]) {
+          videoBuffer.timestampOffset = buffer.timestampOffset = offset;
+          for (const [target, data] of [[videoBuffer, videoBytes], [buffer, bytes]]) await new Promise((resolve, reject) => {target.addEventListener('updateend', resolve, {once: true}); target.addEventListener('error', reject, {once: true}); target.appendBuffer(data);});
+        }
         if (playbackMime.startsWith('audio/mp4')) {
           const moov = YouTubeFXDemux.boxes(new Uint8Array(bytes)).find(box => box.type === 'moov');
           globalThis.__repeatHeader = async () => {
@@ -67,7 +69,8 @@ async function run() {
           const webm = new Uint8Array(await (await fetch('/fixture.webm')).arrayBuffer()), track = {mime, packets: [], generation: 1}; let serial = 0;
           const parser = new YouTubeFXDemux.WebMAudio(config => track.config = config, packet => {packet.id = ++serial; track.packets.push(packet);});
           parser.append(webm);
-          track.packets.push(...track.packets.map(packet => ({...packet, id: ++serial, timestamp: packet.timestamp + 16e6})));
+          const firstPackets = track.packets.slice();
+          for (const offset of [16, 32, 48]) track.packets.push(...firstPackets.map(packet => ({...packet, id: ++serial, timestamp: packet.timestamp + offset * 1e6}))); 
           globalThis.__youtubeFXTap = {find: () => track, diagnostics: () => ({fixture: 'Opus demux/decoder with AAC media clock', packets: track.packets.length, codec: track.config?.codec})};
         }
         return {mime, nativeMSE: nativeWebM, tap: __youtubeFXTap.diagnostics()};
@@ -108,6 +111,45 @@ async function run() {
       data = await report(); assert.equal(data.pitch.stereo, 'phase-linked'); assert.ok(data.recovery.latencyCompensationMs > 310 && data.recovery.latencyCompensationMs < 325);
       console.log('Decoded pitch-only stereo measurement:', JSON.stringify({type, ...stereo, lookaheadMs: data.recovery.latencyCompensationMs}));
       checks.push(type + ': real decoded pitch-only output preserves distinct left/right tones and compensates processing latency.');
+      // This Linux GStreamer build freezes MSE's video clock when its native
+      // audio track is disabled and playbackRate changes (also reproduced
+      // without the extension). Apple Safari uses AVFoundation instead.
+      // Keep the native clock real, but virtualize track.enabled only for the
+      // rate scenarios. The existing 1x tests above/below use native switching.
+      await page.evaluate(() => {
+        const track = document.querySelector('video').audioTracks[0];
+        const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(track), 'enabled');
+        let enabled = track.enabled; descriptor.set.call(track, true);
+        Object.defineProperty(track, 'enabled', {configurable: true, get: () => enabled, set: value => {enabled = Boolean(value);}});
+        globalThis.__restoreRateTrack = () => {delete track.enabled; descriptor.set.call(track, enabled);};
+      });
+      const rateBaseline = await report();
+      for (const scenario of [{rate: 95, linked: true, ratio: .95}, {rate: 95, linked: false, ratio: 1}, {rate: 150, linked: true, ratio: 1.5}]) {
+        await page.evaluate(scenario => __message({type: 'youtube-fx:set', patch: {rate: scenario.rate, linked: scenario.linked, semitones: 0, cents: 0, reverb: 0, volume: 100}}), scenario);
+        await poll(async () => {const d = await report(); return d.recovery.active && Math.abs((d.recovery.playback?.rate || 0) - scenario.rate / 100) < .005;});
+        await page.waitForTimeout(1300);
+        const measured = await page.evaluate(ratio => {
+          const amplitude = (analyser, frequency) => {
+            const data = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(data);
+            let real = 0, imag = 0, weight = 0;
+            for (let i = 0; i < data.length; i++) {const w = .5 - .5 * Math.cos(2 * Math.PI * i / data.length), v = data[i] * w; real += v * Math.cos(2 * Math.PI * i * frequency / 48000); imag += v * Math.sin(2 * Math.PI * i * frequency / 48000); weight += w;}
+            return 2 * Math.hypot(real, imag) / weight;
+          };
+          return {left: amplitude(__stereoAnalysers[0], 440 * ratio), right: amplitude(__stereoAnalysers[1], 660 * ratio), leak: amplitude(__stereoAnalysers[0], 660 * ratio)};
+        }, scenario.ratio);
+        const d = await report(), q = d.recovery.playback;
+        const position = q.mediaTime + Math.max(0, d.audioClock - q.contextTime) * q.rate - d.recovery.mediaLookaheadMs / 1000;
+        console.log('Rate measurement:', JSON.stringify({type, scenario, measured, syncError: position - d.players[0].time, playback: q}));
+        if (!(measured.left > .12 && measured.right > .12)) console.log('Rate failure diagnostics:', JSON.stringify({data: d, engine: await page.evaluate(() => ({lastTime: __nativeFixtureEngine.recovery.lastTime, held: __nativeFixtureEngine.recovery.held, lastAdvance: __nativeFixtureEngine.recovery.lastAdvanceClock, videoTime: document.querySelector('video').currentTime, seeking: document.querySelector('video').seeking}))}));
+        assert.ok(measured.left > .12 && measured.right > .12 && measured.leak < .001, JSON.stringify(measured));
+        assert.equal(d.settings.rate, scenario.rate); assert.equal(d.pitch.active, !scenario.linked);
+        assert.equal(d.recovery.decoderResets, rateBaseline.recovery.decoderResets); assert.equal(q.epoch, rateBaseline.recovery.playback.epoch);
+        assert.equal(q.underrunFrames, 0); assert.ok(Math.abs(position - d.players[0].time) < .18);
+        checks.push(type + ': ' + scenario.rate + '% ' + (scenario.linked ? 'linked' : 'independent original-key') + ' playback measures the correct stereo pitch and stays synchronized without a decoder reset.');
+      }
+      await page.evaluate(() => __message({type: 'youtube-fx:set', patch: {rate: 100, linked: false, semitones: -1, cents: 0, reverb: 0}}));
+      await page.waitForTimeout(900);
+      await page.evaluate(() => __restoreRateTrack());
       if (type === 'mp4') {
         const beforeHeaders = await report();
         await page.evaluate(async () => {for (let i = 0; i < 5; i++) await __repeatHeader();});
@@ -163,4 +205,5 @@ async function run() {
     console.log(JSON.stringify({checks, passed: checks.length}, null, 2));
   } finally {await browser.close();}
 }
-run().catch(error => {console.error(error); process.exitCode = 1;});
+const testDeadline = setTimeout(() => {console.error('Browser test deadline exceeded'); process.exit(1);}, 120000);
+run().catch(error => {console.error(error); process.exitCode = 1;}).finally(() => clearTimeout(testDeadline));

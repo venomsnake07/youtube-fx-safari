@@ -6,8 +6,8 @@
  */
 (() => {
   'use strict';
-  const TAPS = 96, RADIUS = TAPS / 2, PHASES = 256, CUTOFFS = 32;
-  const MIN_CUTOFF = 0.45, MAX_CUTOFF = 0.95;
+  const TAPS = 96, RADIUS = TAPS / 2, PHASES = 256, CUTOFFS = 64;
+  const MIN_CUTOFF = 0.20, MAX_CUTOFF = 0.95;
   const PHASE_STRIDE = TAPS, CUTOFF_STRIDE = (PHASES + 1) * TAPS;
   let sharedTable;
   function resamplerTable() {
@@ -32,12 +32,12 @@
     sharedTable = table; return table;
   }
   class StereoPitch {
-    constructor(sampleRate = 48000, table = resamplerTable()) {
+    constructor(sampleRate = 48000, table = resamplerTable(), extended = false) {
       this.sampleRate = sampleRate; this.table = table;
       this.kernel = globalThis.YouTubeFXPitchKernel.create(); this.api = this.kernel.api;
       // The high quality time-stretch configuration. Split computation spreads
       // spectral work across render calls rather than one large FFT burst.
-      this.api.configure(2, Math.round(sampleRate * 0.24), Math.round(sampleRate * 0.06), 1);
+      this.api.configure(2, Math.round(sampleRate * 0.24), Math.round(sampleRate * (extended ? 0.03 : 0.06)), 1);
       this.api.reset(); this.api.setTransposeSemitones(0, 0);
       this.capacity = 2048; this.pointer = this.api.setBuffers(2, this.capacity);
       this.inputLatency = this.api.inputLatency(); this.outputLatency = this.api.outputLatency();
@@ -45,6 +45,10 @@
       this.ringSize = 4096; this.mask = this.ringSize - 1;
       this.left = new Float32Array(this.ringSize); this.right = new Float32Array(this.ringSize);
       this.smoothing = 1 - Math.exp(-128 / (sampleRate * 0.025));
+      // Preallocate a denser-overlap engine for extreme independent ratios.
+      // Ordinary shifts retain the established chord/transient behaviour.
+      // No engine construction or FFT reconfiguration occurs in process().
+      this.extended = extended ? null : new StereoPitch(sampleRate, table, true);
       this.reset();
     }
     updateViews() {
@@ -55,11 +59,18 @@
       this.api.reset(); this.pitch = NaN; this.targetPitch = NaN;
       this.left.fill(0); this.right.fill(0);
       this.generated = 0; this.fraction = 0; this.position = -RADIUS;
+      this.usingExtended = false; this.extended?.reset();
     }
     process(inputs, outputs, semitones) {
       const left = inputs?.[0], right = inputs?.[1] || left;
       const frames = outputs[0].length;
-      const target = Number.isFinite(semitones) ? Math.max(-12.5, Math.min(12.5, semitones)) : 0;
+      const target = Number.isFinite(semitones) ? Math.max(-24.5, Math.min(24.5, semitones)) : 0;
+      if (this.extended && Math.abs(target) > 12.5) {
+        if (!this.usingExtended) this.extended.reset();
+        this.usingExtended = true; this.targetPitch = target;
+        this.extended.process(inputs, outputs, target); return;
+      }
+      if (this.usingExtended) this.reset();
       if (!Number.isFinite(this.pitch)) this.pitch = target;
       this.targetPitch = target;
       const table = this.table, mask = this.mask;
@@ -114,6 +125,7 @@
       return {algorithm: 'Signalsmith Stretch', version: '1.3.2', method: 'stereo stretch + 96-tap sinc', stereo: 'phase-linked',
         channels: 2, sampleRate: this.sampleRate, sampleFormat: 'float32',
         inputLatencySamples: this.inputLatency, outputLatencySamples: this.outputLatency, resamplerRadius: RADIUS,
+        extendedOutputLatencySamples: this.extended?.outputLatency ?? this.outputLatency,
         latencySamples: Math.ceil(latency), latencyMs: latency / this.sampleRate * 1000};
     }
   }

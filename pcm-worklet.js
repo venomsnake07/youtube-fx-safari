@@ -11,7 +11,7 @@ class YouTubePCMProcessor extends AudioWorkletProcessor {
         if (data.op === 'data') for (const chunk of data.chunks) this.timeline.enqueue(chunk.start, chunk.planes, chunk.sampleRate);
         else if (data.op === 'play') this.timeline.play(data.mediaTime, data.contextFrame);
         else if (data.op === 'pause') this.timeline.pause();
-        else if (data.op === 'rate') this.timeline.setRate(data.value);
+        else if (data.op === 'rate') this.timeline.setRate(data.value, data.immediate);
       }
     };
   }

@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const {normalize, DEFAULTS} = globalThis.YouTubeFXSettings;
+  const {normalize, DEFAULTS, correctionPitch} = globalThis.YouTubeFXSettings;
   class AudioEngine {
     constructor(resourceURL, onState = () => {}) {
       this.resourceURL = resourceURL; this.onState = onState;
@@ -120,7 +120,7 @@
           this.pitchNode.onprocessorerror = () => {
             this.fatal = true;
             this.error = 'Pitch processor stopped. Effects are bypassed; reload YouTube to restart.';
-            this.ramp(this.bypass.gain, 1); this.ramp(this.fx.gain, 0); this.report();
+            this.apply(this.settings); this.report();
           };
           this.backend = 'AudioWorklet'; return;
         } catch (error) {
@@ -145,7 +145,7 @@
           inputs[c] = event.inputBuffer.getChannelData(Math.min(c, event.inputBuffer.numberOfChannels - 1));
           outputs[c] = event.outputBuffer.getChannelData(c);
         }
-        if (active) stereo.process(inputs, outputs, this.settings.semitones + this.settings.cents / 100);
+        if (active) stereo.process(inputs, outputs, correctionPitch(this.settings));
         else for (let c = 0; c < 2; c++) outputs[c].set(inputs[c]);
       };
       this.backend = 'Compatibility';
@@ -159,9 +159,12 @@
     apply(raw, supportedPage = this.supportedPage) {
       this.settings = normalize(raw); this.supportedPage = supportedPage;
       if ((!this.settings.enabled || !supportedPage) && this.recovery) this.recovery.stop();
+      for (const [media, record] of this.activeSources) this.syncMediaRate(media, record);
       if (!this.ready) return;
       const s = this.settings, enabled = s.enabled && supportedPage && !this.error;
-      const pitch = s.semitones + s.cents / 100;
+      // The native player and decoded queue both change pitch naturally with
+      // speed. Linked playback therefore bypasses time stretching completely.
+      const pitch = correctionPitch(s);
       const wasPitchActive = this.pitchActive;
       this.pitchActive = enabled && Math.abs(pitch) > 0.0001;
       if (this.backend === 'AudioWorklet') {
@@ -181,12 +184,31 @@
       this.ramp(this.wet.gain, mix * 0.9);
       this.ramp(this.output.gain, s.volume / 100);
       this.scheduleDecay(s.decay);
+      this.recovery?.requestTick?.();
       this.report();
     }
-    pitchLatencySamples(pitch = this.settings.semitones + this.settings.cents / 100) {
+    syncMediaRate(media, record, enabled = this.settings.enabled && this.supportedPage && !this.error && !this.fatal) {
+      if (enabled) {
+        if (!record.transport) {
+          record.transport = {rate: media.playbackRate, pitch: {}};
+          for (const key of ['preservesPitch', 'webkitPreservesPitch']) if (key in media) record.transport.pitch[key] = media[key];
+        }
+        // Disable the browser's time stretch: our stereo engine supplies only
+        // the correction needed in independent mode.
+        for (const key of Object.keys(record.transport.pitch)) if (media[key] !== false) media[key] = false;
+        const rate = this.settings.rate / 100;
+        if (Math.abs(media.playbackRate - rate) > 0.00001) media.playbackRate = rate;
+      } else if (record.transport) {
+        const original = record.transport; record.transport = null;
+        for (const [key, value] of Object.entries(original.pitch)) media[key] = value;
+        if (Math.abs(media.playbackRate - original.rate) > 0.00001) media.playbackRate = original.rate;
+      }
+    }
+    pitchLatencySamples(pitch = correctionPitch(this.settings)) {
       const info = this.pitchInfo;
       if (!info) return 0;
-      return info.inputLatencySamples !== undefined ? info.inputLatencySamples + (info.outputLatencySamples + info.resamplerRadius) / Math.pow(2, pitch / 12) : info.latencySamples;
+      const outputLatency = Math.abs(pitch) > 12.5 ? info.extendedOutputLatencySamples ?? info.outputLatencySamples : info.outputLatencySamples;
+      return info.inputLatencySamples !== undefined ? info.inputLatencySamples + (outputLatency + info.resamplerRadius) / Math.pow(2, pitch / 12) : info.latencySamples;
     }
     processingLatencySeconds() {
       if (!this.ready || !this.settings.enabled || !this.supportedPage) return 0;
@@ -239,6 +261,7 @@
       if (this.sources.has(media)) {
         const record = this.sources.get(media);
         if (!record.connected) { record.source.connect(this.input); record.connected = true; this.activeSources.set(media, record); }
+        this.syncMediaRate(media, record);
         return;
       }
       try {
@@ -254,7 +277,15 @@
         media.addEventListener('seeking', reset);
         media.addEventListener('emptied', reset);
         const record = {source, connected: true, reset};
-        this.sources.set(media, record); this.activeSources.set(media, record); this.report();
+        const rateChanged = () => {
+          if (!record.connected || !media.isConnected) return;
+          this.syncMediaRate(media, record); this.recovery?.requestTick?.();
+        };
+        media.addEventListener('ratechange', rateChanged);
+        media.addEventListener('loadedmetadata', rateChanged);
+        media.addEventListener('playing', rateChanged);
+        this.sources.set(media, record); this.activeSources.set(media, record);
+        this.syncMediaRate(media, record); this.report();
       } catch (error) {
         this.error = error.name === 'InvalidStateError'
           ? 'Another audio extension is using this player. Disable it and reload YouTube.'
@@ -269,6 +300,7 @@
     prune() {
       // Keep a source per element for its whole lifetime: re-creating one is illegal.
       for (const [media, record] of this.activeSources) if (!media.isConnected && record.connected) {
+        this.syncMediaRate(media, record, false);
         record.source.disconnect(); record.connected = false; this.activeSources.delete(media);
       }
     }
@@ -294,6 +326,9 @@
         version: globalThis.YouTubeFXSettings.VERSION,
         browser: globalThis.navigator?.userAgent || 'unknown',
         settings: {...this.settings}, audio: this.status(),
+        playback: {ratePercent: this.settings.rate, linked: this.settings.linked,
+          pitchSemitones: this.settings.linked ? globalThis.YouTubeFXSettings.naturalPitch(this.settings.rate) : this.settings.semitones + this.settings.cents / 100,
+          correctionSemitones: correctionPitch(this.settings), method: this.settings.linked ? 'natural stereo resampling' : 'stereo resampling + phase-linked pitch correction'},
         sampleRate: this.context?.sampleRate || null,
         audioClock: this.context?.currentTime || 0,
         inputPeak: this.inputPeak, outputPeak: this.outputPeak,
@@ -309,6 +344,7 @@
           const src = media.currentSrc || media.src || '';
           return {type: media.tagName || 'unknown', connected: record.connected, paused: Boolean(media.paused),
             muted: Boolean(media.muted), volume: media.volume, readyState: media.readyState,
+            playbackRate: media.playbackRate, preservesPitch: media.preservesPitch ?? media.webkitPreservesPitch ?? null,
             time: Number.isFinite(media.currentTime) ? Math.round(media.currentTime * 10) / 10 : null,
             source: src.startsWith('blob:') ? 'blob / MediaSource' : /m3u8|\/hls\//i.test(src) ? 'HLS' : src.startsWith('data:') ? 'data' : src ? 'URL' : 'empty',
             audioTracks: media.audioTracks?.length ?? null, videoWidth: media.videoWidth ?? null};
